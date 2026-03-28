@@ -30,6 +30,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
+      - name: Read Audiveris version from Dockerfile
+        id: audiveris_version
+        run: echo "version=$(sed -n 's/^ARG AUDIVERIS_VERSION=//p' Dockerfile)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -48,15 +52,26 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          build-args: |
+            AUDIVERIS_VERSION=${{ steps.audiveris_version.outputs.version }}
           push: true
           platforms: ${{ matrix.platform }}
-          tags: ${{ steps.image_name.outputs.name }}:${{ github.sha }}-${{ matrix.suffix }}
+          tags: |
+            ${{ steps.image_name.outputs.name }}:${{ github.sha }}-${{ matrix.suffix }}
+            ${{ steps.image_name.outputs.name }}:audiveris-${{ steps.audiveris_version.outputs.version }}-${{ matrix.suffix }}
 
   merge:
     needs: build
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Read Audiveris version from Dockerfile
+        id: audiveris_version
+        run: echo "version=$(sed -n 's/^ARG AUDIVERIS_VERSION=//p' Dockerfile)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -80,13 +95,25 @@ jobs:
         env:
           IMAGE_NAME: ${{ steps.image_name.outputs.name }}
 
+      - name: Create multi-arch manifest (Audiveris version)
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:audiveris-${AUDIVERIS_VERSION}" \
+            "${IMAGE_NAME}:audiveris-${AUDIVERIS_VERSION}-amd64" \
+            "${IMAGE_NAME}:audiveris-${AUDIVERIS_VERSION}-arm64"
+        env:
+          IMAGE_NAME: ${{ steps.image_name.outputs.name }}
+          AUDIVERIS_VERSION: ${{ steps.audiveris_version.outputs.version }}
+
       - name: Create multi-arch manifest (version + latest)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           docker buildx imagetools create \
             -t "${IMAGE_NAME}:${{ github.ref_name }}" \
+            -t "${IMAGE_NAME}:${{ github.ref_name }}-audiveris-${AUDIVERIS_VERSION}" \
             -t "${IMAGE_NAME}:latest" \
             "${IMAGE_NAME}:${{ github.sha }}-amd64" \
             "${IMAGE_NAME}:${{ github.sha }}-arm64"
         env:
           IMAGE_NAME: ${{ steps.image_name.outputs.name }}
+          AUDIVERIS_VERSION: ${{ steps.audiveris_version.outputs.version }}

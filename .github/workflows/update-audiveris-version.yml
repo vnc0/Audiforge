@@ -1,0 +1,70 @@
+name: Update Audiveris Version
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Read current Audiveris version
+        id: current_version
+        run: echo "version=$(sed -n 's/^ARG AUDIVERIS_VERSION=//p' Dockerfile)" >> "$GITHUB_OUTPUT"
+
+      - name: Read latest Audiveris tag
+        id: latest_version
+        run: |
+          version=$(git ls-remote --refs --tags https://github.com/Audiveris/audiveris.git | awk -F/ '{print $3}' | sort -V | tail -n1)
+          if [ -z "$version" ]; then
+            echo "Failed to determine latest Audiveris tag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update pinned Audiveris version
+        if: steps.current_version.outputs.version != steps.latest_version.outputs.version
+        env:
+          CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
+          LATEST_VERSION: ${{ steps.latest_version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("Dockerfile")
+          content = path.read_text()
+          old = f"ARG AUDIVERIS_VERSION={os.environ['CURRENT_VERSION']}"
+          new = f"ARG AUDIVERIS_VERSION={os.environ['LATEST_VERSION']}"
+
+          if old not in content:
+              raise SystemExit(f"Could not find {old!r} in Dockerfile")
+
+          path.write_text(content.replace(old, new, 1))
+          PY
+
+      - name: Create pull request
+        if: steps.current_version.outputs.version != steps.latest_version.outputs.version
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/update-audiveris-${{ steps.latest_version.outputs.version }}
+          delete-branch: true
+          commit-message: "chore: update Audiveris to ${{ steps.latest_version.outputs.version }}"
+          title: "chore: update Audiveris to ${{ steps.latest_version.outputs.version }}"
+          body: |
+            ## Summary
+            - update the pinned Audiveris version in `Dockerfile`
+            - keep Docker image builds aligned with the latest upstream Audiveris tag
+
+            ## Test plan
+            - [ ] GitHub Actions `docker-image` workflow passes
+          labels: dependencies
