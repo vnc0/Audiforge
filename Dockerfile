@@ -9,7 +9,7 @@ RUN go build -o audiforge .
 # Stage 2: Build Audiveris and final image
 FROM debian:bookworm-slim
 
-ARG AUDIVERIS_VERSION=5.10.2
+ARG AUDIVERIS_VERSION=win-console
 
 # Install system dependencies
 RUN apt-get update && \
